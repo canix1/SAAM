@@ -5,7 +5,7 @@
 <h2 align="center"><b>Security Assessment Analyzer Machine LUDUS RANGE</b></h2>
 </p>
 <p>
-  <h2 align="center"><img src="https://github.com/canix1/PIMSCAN/blob/main/img/Animation.gif" width="80%"> </h2>
+  <h2 align="center"><img src="https://docs.ludus.cloud/img/logo.svg"> LUDUS RANGE</h2>
 </p>
 
 # LUDUS RANGE
