@@ -9,4 +9,7 @@
 </p>
 
 # LUDUS RANGE
-to follow...
+```
+ludus ansible role add -d ./SAAM/local-bloodhound
+ludus range config set -f ./SAAM/ludus-range-config.yml
+```

@@ -1,44 +1,76 @@
 ---
+# 1. Install Docker Desktop (Prerequisite for BloodHound CLI)
 - name: Install Docker Desktop via Chocolatey
   win_chocolatey:
     name: docker-desktop
     state: present
     choco_args: --ia /quiet
-  # Docker Desktop requires a reboot/logout to finish group membership updates
-  register: docker_install
 
-- name: Ensure Docker Desktop is started (User session required)
+# 2. Install PowerShell Core 7+
+# (Chocolatey is more reliable than Winget for non-interactive Ansible runs)
+- name: Install PowerShell Core
+  win_chocolatey:
+    name: powershell-core
+    state: present
+
+# 3. Install requested PowerShell Modules
+# We use win_shell to ensure we can force install to AllUsers as requested
+- name: Install PowerShell Modules (ImportExcel, ASCIIWRITE, MarkdownPrince)
+  win_shell: |
+    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+    Install-Module -Name ImportExcel -Scope AllUsers -Force
+    Install-Module -Name ASCIIWRITE -Scope AllUsers -Force
+    Install-Module -Name MarkdownPrince -Scope AllUsers -Force
+  ignore_errors: yes
+  # Fails if already installed, ignore_errors prevents stopping the playbook
+
+# 4. Start Docker and Wait (CRITICAL STEP)
+# Without this, 'bloodhound-cli install' will fail with Error 500
+- name: Start Docker Desktop
   win_shell: |
     & "C:\Program Files\Docker\Docker\Docker Desktop.exe"
   async: 10
   poll: 0
 
-- name: Create BloodHound directory
+- name: Wait for Docker Engine to be ready
+  win_shell: docker info
+  register: docker_check
+  until: docker_check.rc == 0
+  retries: 30      # Wait up to ~7.5 minutes
+  delay: 15
+
+# 5. Download and Extract BloodHound CLI
+- name: Create Tools Directory
   win_file:
-    path: C:\BloodHound
+    path: C:\Tools
     state: directory
 
-- name: Download BloodHound CE Docker Compose file
+- name: Download BloodHound CLI
   win_get_url:
-    url: https://raw.githubusercontent.com/SpecterOps/BloodHound/main/examples/docker-compose/docker-compose.yml
-    dest: C:\BloodHound\docker-compose.yml
+    url: https://github.com/SpecterOps/bloodhound-cli/releases/latest/download/bloodhound-cli-windows-amd64.zip
+    dest: C:\Tools\bloodhound-cli.zip
 
-- name: Generate random password for BloodHound
-  set_fact:
-    bh_password: "{{ lookup('password', '/dev/null length=12 chars=ascii_letters,digits') }}"
+- name: Unzip BloodHound CLI
+  win_unzip:
+    src: C:\Tools\bloodhound-cli.zip
+    dest: C:\Tools\BloodHoundCLI
 
-- name: Create .env file for BloodHound
-  win_copy:
-    dest: C:\BloodHound\.env
-    content: |
-      POSTGRES_USER=bloodhound
-      POSTGRES_PASSWORD={{ bh_password }}
-      POSTGRES_DB=bloodhound
-      NEO4J_AUTH=neo4j/{{ bh_password }}
-
-- name: Start BloodHound CE via Docker Compose
+# 6. Install BloodHound
+- name: Run BloodHound CLI Install
   win_shell: |
-    Set-Location C:\BloodHound
-    docker compose up -d
-  # This might fail if Docker hasn't fully initialized after the first install; 
-  # in a real scenario, you might need a reboot task or wait loop here.
+    Set-Location C:\Tools\BloodHoundCLI
+    # The binary is often inside a subdirectory after unzip, check pattern:
+    $exe = Get-ChildItem -Recurse -Filter "bloodhound-cli.exe" | Select-Object -First 1
+    Set-Location $exe.DirectoryName
+
+    # Run install. 
+    # NOTE: If this command prompts for input, it will hang. 
+    # Currently, 'install' is usually non-interactive for defaults.
+    .\bloodhound-cli.exe install
+  register: bh_install_output
+
+# 7. Show the Password in Logs
+- name: Display BloodHound Install Output (Contains Password)
+  debug:
+    var: bh_install_output.stdout_lines
